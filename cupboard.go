@@ -10,6 +10,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
+	"golang.org/x/sync/errgroup"
 )
 
 type Result struct {
@@ -49,25 +50,40 @@ func checkOption(option *Option) (*Option, error) {
 
 func WithContainers(ctx context.Context, option []*Option) (rets []*Result, cancel func(), err error) {
 	var (
-		ret      *Result
 		canceles []func()
-		cls      func()
 	)
 
+	var g errgroup.Group
+	retCh := make(chan *Result, len(option))
+	cancelCh := make(chan func(), len(option))
+
 	for _, o := range option {
-		ret, cancel, err = WithContainer(ctx, o)
-		if err != nil {
-			return
-		}
-		rets = append(rets, ret)
-		if cls != nil {
-			canceles = append(canceles, cancel)
-		}
+		o := o
+		g.Go(func() error {
+			ret, cancel, err := WithContainer(ctx, o)
+			if err != nil {
+				return err
+			}
+			retCh <- ret
+			cancelCh <- cancel
+			return nil
+		})
+	}
+
+	if err = g.Wait(); err != nil {
+		return
+	}
+
+	for range option {
+		rets = append(rets, <-retCh)
+		canceles = append(canceles, <-cancelCh)
 	}
 
 	cancel = func() {
 		for _, c := range canceles {
-			c()
+			if c != nil {
+				c()
+			}
 		}
 	}
 
@@ -126,7 +142,7 @@ func WithContainer(ctx context.Context, option *Option) (ret *Result, cancel fun
 			nat.Port(portAndProtocol): []nat.PortBinding{
 				{
 					HostIP:   option.HostIp,
-					HostPort: "0",
+					HostPort: option.BindingPort,
 				},
 			},
 		},

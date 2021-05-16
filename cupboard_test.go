@@ -19,45 +19,58 @@ import (
 )
 
 func TestRedis(t *testing.T) {
-	opt := &Option{
-		Image:       "redis:latest",
-		ExposedPort: "6379",
+	opt := []*Option{
+		{
+			Image:       "redis:latest",
+			ExposedPort: "6379",
+			Name:        "redis-1",
+		},
+		{
+			Image:       "redis:latest",
+			ExposedPort: "6379",
+			Name:        "redis-2",
+		},
 	}
 
-	ret, cancel, err := WithContainer(context.Background(), opt)
+	rets, cancel, err := WithContainers(context.Background(), opt)
 	if err != nil {
 		panic(err)
 	}
 	defer cancel()
 
-	client := redis.NewClient(&redis.Options{
-		Addr:       ret.URI,
-		Password:   "",
-		DB:         0,
-		MaxRetries: 10,
-	})
+	for _, ret := range rets {
 
-	var (
-		r string
-		n = "testing"
-	)
+		client := redis.NewClient(&redis.Options{
+			Addr:       ret.URI,
+			Password:   "",
+			DB:         0,
+			MaxRetries: 10,
+		})
 
-	_, err = client.Ping().Result()
-	assert.NoError(t, err)
+		var (
+			r string
+			n = "testing"
+		)
+		_, err = client.Ping().Result()
+		assert.NoError(t, err)
+		if err != nil {
+			return
+		}
 
-	_, err = client.Set("one", n, time.Second).Result()
-	assert.NoError(t, err)
+		_, err = client.Set("one", n, time.Second).Result()
+		assert.NoError(t, err)
 
-	r, err = client.Get("one").Result()
-	assert.NoError(t, err)
+		r, err = client.Get("one").Result()
+		assert.NoError(t, err)
 
-	assert.Equal(t, n, r)
+		assert.Equal(t, n, r)
+	}
 }
 
 func TestMongo(t *testing.T) {
 
 	opt := &Option{
-		Image:       "mongo:latest",
+		Image:       "mongo:4.4",
 		ExposedPort: "27017",
 	}
 
@@ -72,10 +85,13 @@ func TestMongo(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
 
-	ctx, cancel := context.WithTimeout(c, 2*time.Minute)
+	ctx, cancel := context.WithTimeout(c, time.Minute)
 	defer cancel()
 	err = client.Ping(ctx, readpref.Primary())
 	assert.NoError(t, err)
+	if err != nil {
+		return
+	}
 
 	col := client.Database("testing_db").Collection("testing_col")
 
@@ -156,7 +172,8 @@ func TestMysql(t *testing.T) {
 		ExposedPort: "3306",
 		Env:         []string{"MYSQL_ALLOW_EMPTY_PASSWORD=yes", "USER=root", "MYSQL_DATABASE=demo"},
 	}
-	rs, cancel, err := WithContainer(context.Background(), opt)
+	c := context.Background()
+	rs, cancel, err := WithContainer(c, opt)
 	if err != nil {
 		panic(err)
 	}
@@ -170,8 +187,7 @@ func TestMysql(t *testing.T) {
 	db.SetMaxOpenConns(10)
 	db.SetMaxIdleConns(10)
 
-	c := context.Background()
-	ctx, cancel := context.WithTimeout(c, time.Minute*10)
+	ctx, cancel := context.WithTimeout(c, time.Minute)
 	defer cancel()
 
 	err = func() error {
