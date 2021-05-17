@@ -14,22 +14,22 @@ import (
 )
 
 type Result struct {
-	Host        string
-	BindingPort string
-	URI         string
+	Host        string // The host IP; eg: 127.0.0.1
+	BindingPort string // The The port of the host binding the container
+	URI         string // The URI to connect the container; eg: 127.0.0.1:2017
 }
 
 type Option struct {
-	Name        string
-	Image       string
-	ExposedPort string
-	BindingPort string
-	Protocol    string
-	Env         []string
-	HostIp      string
+	Name        string   // The container name
+	Image       string   // The container image and tag; eg: redis:latest
+	ExposedPort string   // The exposed port of the container
+	BindingPort string   // The port of the host binding the container; if not provide, the cupboard will generate a port randomly
+	Protocol    string   // The protocol of connection; default is tcp
+	Env         []string // List of environment variable to set in the container
+	HostIP      string   // Host IP; default is 127.0.0.1
 }
 
-var hostIp = "127.0.0.1"
+var hostIP = "127.0.0.1"
 
 func checkOption(option *Option) (*Option, error) {
 
@@ -41,13 +41,14 @@ func checkOption(option *Option) (*Option, error) {
 		option.Protocol = "tcp"
 	}
 
-	if option.HostIp == "" {
-		option.HostIp = hostIp
+	if option.HostIP == "" {
+		option.HostIP = hostIP
 	}
 
 	return option, nil
 }
 
+// It is to handle multiple containers.
 func WithContainers(ctx context.Context, option []*Option) (rets []*Result, cancel func(), err error) {
 	var (
 		canceles []func()
@@ -90,6 +91,11 @@ func WithContainers(ctx context.Context, option []*Option) (rets []*Result, canc
 	return
 }
 
+// It is to handle one container.
+//
+// It will create a container from an image provided; it will pull the image if the image is unavailable in local.
+//
+// If you want to delete the container, you can call the cancel function.
 func WithContainer(ctx context.Context, option *Option) (ret *Result, cancel func(), err error) {
 
 	option, err = checkOption(option)
@@ -141,7 +147,7 @@ func WithContainer(ctx context.Context, option *Option) (ret *Result, cancel fun
 		PortBindings: nat.PortMap{
 			nat.Port(portAndProtocol): []nat.PortBinding{
 				{
-					HostIP:   option.HostIp,
+					HostIP:   option.HostIP,
 					HostPort: option.BindingPort,
 				},
 			},
