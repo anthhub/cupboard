@@ -24,11 +24,13 @@ func TestRedis(t *testing.T) {
 			Image:       "redis:latest",
 			ExposedPort: "6379",
 			Name:        "redis-1",
+			Override:    true,
 		},
 		{
 			Image:       "redis:latest",
 			ExposedPort: "6379",
 			Name:        "redis-2",
+			Override:    true,
 		},
 	}
 

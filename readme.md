@@ -23,11 +23,13 @@ go get github.com/anthhub/cupboard
 	}
 
 	// create a container with option and return the information of the container
+	// 
+	// images will be pulled and containers will be created
 	ret, cancel, err := WithContainer(context.Background(), opt)
 	if err != nil {
 		panic(err)
 	}
-	// the cancel function will delete the container you created, else the container will be not deleted.
+	// the cancel function will delete the containers you created, else the container will be always live.
 	defer cancel()
 
 	c := context.Background()
@@ -60,11 +62,14 @@ go get github.com/anthhub/cupboard
 			ExposedPort: "6379",
 			// the name of the container, it has to be unique, else panic will occur.
 			Name:        "redis-1",
+			// override container when the name of the container is duplicated
+			Override:    true,
 		},
 		{
 			Image:       "redis:latest",
 			ExposedPort: "6379",
 			Name:        "redis-2",
+			Override:    true,
 		},
 	}
 

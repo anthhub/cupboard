@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
+	"github.com/anthhub/taskgroup"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
-	"golang.org/x/sync/errgroup"
 )
 
 type Result struct {
@@ -20,6 +21,7 @@ type Result struct {
 }
 
 type Option struct {
+	Override    bool     // Override container when the name of the container is duplicated
 	Name        string   // The container name
 	Image       string   // The container image and tag; eg: redis:latest
 	ExposedPort string   // The exposed port of the container
@@ -48,36 +50,43 @@ func checkOption(option *Option) (*Option, error) {
 	return option, nil
 }
 
+type payload struct {
+	Ret    *Result
+	Cancel func()
+	Index  int
+}
+
 // It is to handle multiple containers.
-func WithContainers(ctx context.Context, option []*Option) (rets []*Result, cancel func(), err error) {
-	var (
-		canceles []func()
-	)
+func WithContainers(ctx context.Context, options []*Option) (rets []*Result, cancel func(), err error) {
+	length := len(options)
+	rets = make([]*Result, length)
+	canceles := make([]func(), length)
 
-	var g errgroup.Group
-	retCh := make(chan *Result, len(option))
-	cancelCh := make(chan func(), len(option))
-
-	for _, o := range option {
+	g, c := taskgroup.WithContext(ctx, &taskgroup.Option{MaxErrorCount: 1})
+	for i, o := range options {
+		i := i
 		o := o
-		g.Go(func() error {
-			ret, cancel, err := WithContainer(ctx, o)
+		g.Go(func() (interface{}, error) {
+			ret, cancel, err := WithContainer(c, o)
 			if err != nil {
-				return err
+				return nil, err
 			}
-			retCh <- ret
-			cancelCh <- cancel
-			return nil
+			return &payload{ret, cancel, i}, nil
 		})
 	}
 
-	if err = g.Wait(); err != nil {
-		return
-	}
+	for p := range g.Fed().Result() {
+		err = p.Err
+		if err != nil {
+			return
+		}
+		data, ok := (p.Data).(*payload)
+		if !ok {
+			panic(err)
+		}
 
-	for range option {
-		rets = append(rets, <-retCh)
-		canceles = append(canceles, <-cancelCh)
+		rets[data.Index] = data.Ret
+		canceles[data.Index] = data.Cancel
 	}
 
 	cancel = func() {
@@ -110,31 +119,14 @@ func WithContainer(ctx context.Context, option *Option) (ret *Result, cancel fun
 		return
 	}
 
-	images, err := c.ImageList(ctx, types.ImageListOptions{})
+	err = checkImage(ctx, c, option)
 	if err != nil {
 		return
 	}
 
-	finded := false
-	for _, image := range images {
-		if finded {
-			break
-		}
-		for _, repoTags := range image.RepoTags {
-			if repoTags == option.Image {
-				finded = true
-				break
-			}
-		}
-	}
-
-	if !finded {
-		var reader io.ReadCloser
-		reader, err = c.ImagePull(ctx, option.Image, types.ImagePullOptions{})
-		if err != nil {
-			return
-		}
-		io.Copy(os.Stdout, reader)
+	err = checkContainer(ctx, c, option)
+	if err != nil {
+		return
 	}
 
 	resp, err := c.ContainerCreate(ctx, &container.Config{
@@ -159,9 +151,7 @@ func WithContainer(ctx context.Context, option *Option) (ret *Result, cancel fun
 	containerID := resp.ID
 
 	cancel = func() {
-		err := c.ContainerRemove(ctx, containerID, types.ContainerRemoveOptions{
-			Force: true,
-		})
+		err := forceRemoveContainer(ctx, c, containerID)
 		if err != nil {
 			panic(err)
 		}
@@ -188,4 +178,73 @@ func WithContainer(ctx context.Context, option *Option) (ret *Result, cancel fun
 	ret = &Result{URI: URI, Host: hostPort.HostIP, BindingPort: hostPort.HostPort}
 
 	return
+}
+
+func forceRemoveContainer(ctx context.Context, c *client.Client, containerID string) error {
+	err := c.ContainerRemove(ctx, containerID, types.ContainerRemoveOptions{
+		Force: true,
+	})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func checkImage(ctx context.Context, c *client.Client, option *Option) error {
+
+	images, err := c.ImageList(ctx, types.ImageListOptions{})
+	if err != nil {
+		return err
+	}
+
+	finded := false
+	for _, image := range images {
+		if finded {
+			break
+		}
+		for _, repoTags := range image.RepoTags {
+			if repoTags == option.Image {
+				finded = true
+				break
+			}
+		}
+	}
+
+	if !finded {
+		var reader io.ReadCloser
+		reader, err = c.ImagePull(ctx, option.Image, types.ImagePullOptions{})
+		if err != nil {
+			return err
+		}
+		io.Copy(os.Stdout, reader)
+	}
+
+	return nil
+}
+
+func checkContainer(ctx context.Context, c *client.Client, option *Option) error {
+
+	if !option.Override {
+		return nil
+	}
+
+	containers, err := c.ContainerList(ctx, types.ContainerListOptions{All: true})
+	if err != nil {
+		return err
+	}
+	for _, container := range containers {
+		for _, name := range container.Names {
+			name = strings.Replace(name, "/", "", 1)
+			cname := strings.Replace(option.Name, "/", "", 1)
+
+			if name == cname {
+				err := forceRemoveContainer(ctx, c, container.ID)
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	return nil
 }
