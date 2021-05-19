@@ -3,7 +3,6 @@ module github.com/anthhub/cupboard
 go 1.15
 
 require (
-	git.llsapp.com/algapi/common v0.0.0-20210519023729-c069060920b5
 	github.com/Microsoft/go-winio v0.5.0 // indirect
 	github.com/anthhub/taskgroup v0.2.0
 	github.com/containerd/containerd v1.5.1 // indirect
