@@ -1,6 +1,6 @@
 # Cupboard
 
-> A cupboard accessing to containers freely.
+> A cupboard taking and putting containers freely.
  
 > A package controlling containers programmatically.
 
@@ -24,11 +24,13 @@ go get github.com/anthhub/cupboard
 
 	// create a container with option and return the information of the container
 	// 
-	// images will be pulled and containers will be created
+	// images will be pulled if don't exist and containers will be created for your using
 	ret, cancel, err := WithContainer(context.Background(), opt)
 	if err != nil {
 		panic(err)
 	}
+	// the container will be deleted when error occur
+	// 
 	// the cancel function will delete the containers you created, else the container will be always live.
 	defer cancel()
 
