@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/anthhub/taskgroup"
 	"github.com/docker/docker/api/types"
@@ -106,6 +107,11 @@ func WithContainers(ctx context.Context, options []*Option) (rets []*Result, can
 //
 // If you want to delete the container, you can call the cancel function.
 func WithContainer(ctx context.Context, option *Option) (ret *Result, cancel func(), err error) {
+	defer func() {
+		if err != nil && cancel != nil {
+			cancel()
+		}
+	}()
 
 	option, err = checkOption(option)
 	if err != nil {
@@ -150,11 +156,14 @@ func WithContainer(ctx context.Context, option *Option) (ret *Result, cancel fun
 	}
 	containerID := resp.ID
 
+	var once sync.Once
 	cancel = func() {
-		err := forceRemoveContainer(ctx, c, containerID)
-		if err != nil {
-			panic(err)
-		}
+		once.Do(func() {
+			err := forceRemoveContainer(ctx, c, containerID)
+			if err != nil {
+				panic(err)
+			}
+		})
 	}
 
 	err = c.ContainerStart(ctx, containerID, types.ContainerStartOptions{})
