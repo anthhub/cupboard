@@ -20,6 +20,8 @@ go get github.com/anthhub/cupboard
 		Image:       "mongo:4.4",
 		// the exposed port of the container 
 		ExposedPort: "27017",
+        // the local port binding container 
+	    BindingPort: "37379",
 	}
 
 	// create a container with option and return the information of the container

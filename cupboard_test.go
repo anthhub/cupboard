@@ -19,18 +19,21 @@ import (
 )
 
 func TestRedis(t *testing.T) {
+
 	opt := []*Option{
 		{
 			Image:       "redis:latest",
 			ExposedPort: "6379",
 			Name:        "redis-1",
 			Override:    true,
+			BindingPort: "36379",
 		},
 		{
 			Image:       "redis:latest",
 			ExposedPort: "6379",
 			Name:        "redis-2",
 			Override:    true,
+			BindingPort: "37379",
 		},
 	}
 
@@ -74,6 +77,7 @@ func TestMongo(t *testing.T) {
 	opt := &Option{
 		Image:       "mongo:4.4",
 		ExposedPort: "27017",
+		BindingPort: "37017",
 	}
 
 	ret, cancel, err := WithContainer(context.Background(), opt)
@@ -172,6 +176,7 @@ func TestMysql(t *testing.T) {
 	opt := &Option{
 		Image:       "mysql:latest",
 		ExposedPort: "3306",
+		BindingPort: "33306",
 		Env:         []string{"MYSQL_ALLOW_EMPTY_PASSWORD=yes", "USER=root", "MYSQL_DATABASE=demo"},
 	}
 	c := context.Background()
