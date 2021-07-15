@@ -7,9 +7,8 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
-
 	"github.com/go-redis/redis"
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
