@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/anthhub/taskgroup"
 	"github.com/docker/docker/api/types"
@@ -15,52 +17,10 @@ import (
 	"github.com/docker/go-connections/nat"
 )
 
-type Result struct {
-	Host        string // The host IP; eg: 127.0.0.1
-	BindingPort string // The The port of the host binding the container
-	URI         string // The URI to connect the container; eg: 127.0.0.1:2017
-}
-
-type Option struct {
-	Override    bool     // Override container when the name of the container is duplicated
-	Name        string   // The container name
-	Image       string   // The container image and tag; eg: redis:latest
-	ExposedPort string   // The exposed port of the container
-	BindingPort string   // The port of the host binding the container; if not provide, the cupboard will generate a port randomly
-	Protocol    string   // The protocol of connection; default is tcp
-	Env         []string // List of environment variable to set in the container
-	HostIP      string   // Host IP; default is 127.0.0.1
-}
-
-var hostIP = "127.0.0.1"
-
-func checkOption(option *Option) (*Option, error) {
-
-	if option.Image == "" {
-		return nil, fmt.Errorf("image is unavailable")
-	}
-
-	if option.Protocol == "" {
-		option.Protocol = "tcp"
-	}
-
-	if option.HostIP == "" {
-		option.HostIP = hostIP
-	}
-
-	return option, nil
-}
-
-type payload struct {
-	Ret    *Result
-	Cancel func()
-	Index  int
-}
-
 // It is to handle multiple containers.
-func WithContainers(ctx context.Context, options []*Option) (rets []*Result, cancel func(), err error) {
+func WithContainers(ctx context.Context, options []*Option) (*Result, error) {
 	length := len(options)
-	rets = make([]*Result, length)
+	infos := make([]*Info, length)
 	canceles := make([]func(), length)
 
 	g, c := taskgroup.WithContext(ctx, &taskgroup.Option{MaxErrorCount: 1})
@@ -68,29 +28,29 @@ func WithContainers(ctx context.Context, options []*Option) (rets []*Result, can
 		i := i
 		o := o
 		g.Go(func() (interface{}, error) {
-			ret, cancel, err := WithContainer(c, o)
+			info, cancel, err := upContainer(c, o)
 			if err != nil {
 				return nil, err
 			}
-			return &payload{ret, cancel, i}, nil
+			return &payload{info, cancel, i}, nil
 		})
 	}
 
 	for p := range g.Fed().Result() {
-		err = p.Err
+		err := p.Err
 		if err != nil {
-			return
+			return nil, err
 		}
 		data, ok := (p.Data).(*payload)
 		if !ok {
 			panic(err)
 		}
 
-		rets[data.Index] = data.Ret
+		infos[data.Index] = data.Info
 		canceles[data.Index] = data.Cancel
 	}
 
-	cancel = func() {
+	cancel := func() {
 		for _, c := range canceles {
 			if c != nil {
 				c()
@@ -98,7 +58,26 @@ func WithContainers(ctx context.Context, options []*Option) (rets []*Result, can
 		}
 	}
 
-	return
+	ret := &Result{
+		Infos: infos,
+		Close: cancel,
+	}
+
+	ret.Wait = func() {
+		fmt.Println("Wait...")
+		sigs := make(chan os.Signal, 1)
+		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+		<-sigs
+		fmt.Println("Bye...")
+		ret.Close()
+	}
+
+	go func() {
+		<-ctx.Done()
+		ret.Close()
+	}()
+
+	return ret, nil
 }
 
 // It is to handle one container.
@@ -106,7 +85,7 @@ func WithContainers(ctx context.Context, options []*Option) (rets []*Result, can
 // It will create a container from an image provided; it will pull the image if the image is unavailable in local.
 //
 // If you want to delete the container, you can call the cancel function.
-func WithContainer(ctx context.Context, option *Option) (ret *Result, cancel func(), err error) {
+func upContainer(ctx context.Context, option *Option) (ret *Info, cancel func(), err error) {
 	defer func() {
 		if err != nil && cancel != nil {
 			cancel()
@@ -184,11 +163,11 @@ func WithContainer(ctx context.Context, option *Option) (ret *Result, cancel fun
 
 	hostPort := ports[0]
 	URI := fmt.Sprintf("%s:%s", hostPort.HostIP, hostPort.HostPort)
-	ret = &Result{URI: URI, Host: hostPort.HostIP, BindingPort: hostPort.HostPort}
-
+	ret = &Info{URI: URI, Host: hostPort.HostIP, BindingPort: hostPort.HostPort}
 	return
 }
 
+// It is to force remove the container.
 func forceRemoveContainer(ctx context.Context, c *client.Client, containerID string) error {
 	err := c.ContainerRemove(ctx, containerID, types.ContainerRemoveOptions{
 		Force: true,
@@ -199,8 +178,10 @@ func forceRemoveContainer(ctx context.Context, c *client.Client, containerID str
 	return nil
 }
 
+// It is to find the image from local.
+//
+// If the image is unavailable, cupboard will pull it.
 func checkImage(ctx context.Context, c *client.Client, option *Option) error {
-
 	images, err := c.ImageList(ctx, types.ImageListOptions{})
 	if err != nil {
 		return err
@@ -231,8 +212,10 @@ func checkImage(ctx context.Context, c *client.Client, option *Option) error {
 	return nil
 }
 
+// It is to check the container by name.
+//
+// If the name of container is exist and option.Override is true, cupboard will remove the container and create a new one.
 func checkContainer(ctx context.Context, c *client.Client, option *Option) error {
-
 	if !option.Override {
 		return nil
 	}
@@ -256,4 +239,21 @@ func checkContainer(ctx context.Context, c *client.Client, option *Option) error
 	}
 
 	return nil
+}
+
+// it to check the options.
+func checkOption(option *Option) (*Option, error) {
+	if option.Image == "" {
+		return nil, fmt.Errorf("image is unavailable")
+	}
+
+	if option.Protocol == "" {
+		option.Protocol = "tcp"
+	}
+
+	if option.HostIP == "" {
+		option.HostIP = hostIP
+	}
+
+	return option, nil
 }

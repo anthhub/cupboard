@@ -4,9 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/anthhub/cupboard"
@@ -14,22 +11,24 @@ import (
 )
 
 func prepareDB() {
-	opt := &cupboard.Option{
-		HostIP:      "0.0.0.0",
-		Image:       "mysql:latest",
-		ExposedPort: "3306",
-		BindingPort: "33307",
-		Env:         []string{"MYSQL_ALLOW_EMPTY_PASSWORD=yes", "USER=root", "MYSQL_DATABASE=demo"},
+	opt := []*cupboard.Option{
+		{
+			HostIP:      "0.0.0.0",
+			Image:       "mysql:latest",
+			ExposedPort: "3306",
+			BindingPort: "33307",
+			Env:         []string{"MYSQL_ALLOW_EMPTY_PASSWORD=yes", "USER=root", "MYSQL_DATABASE=demo"},
+		},
 	}
 	c := context.Background()
-	rs, cancel, err := cupboard.WithContainer(c, opt)
+	result, err := cupboard.WithContainers(c, opt)
 	if err != nil {
 		panic(err)
 	}
-	defer cancel()
-	fmt.Printf("\n rs %v \n ", rs)
+	defer result.Close()
+	fmt.Printf("\n result %v \n ", result)
 
-	dbDSN := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=%s&parseTime=true", "root", "", rs.Host, rs.BindingPort, "demo", "utf8mb4")
+	dbDSN := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=%s&parseTime=true", "root", "", result.Infos[0].Host, result.Infos[0].BindingPort, "demo", "utf8mb4")
 	db, err := sql.Open("mysql", dbDSN)
 	if err != nil {
 		panic(err)
@@ -66,6 +65,8 @@ func prepareDB() {
 	}
 
 	prepareData(db)
+
+	result.Wait()
 }
 
 func prepareData(db *sql.DB) {
@@ -122,12 +123,6 @@ func prepareData(db *sql.DB) {
 		}
 	}
 
-	fmt.Println("wait...")
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-
-	<-sigs
-	fmt.Println("Bye...")
 }
 
 func main() {

@@ -36,14 +36,13 @@ func TestRedis(t *testing.T) {
 		},
 	}
 
-	rets, cancel, err := WithContainers(context.Background(), opt)
+	ret, err := WithContainers(context.Background(), opt)
 	if err != nil {
 		panic(err)
 	}
-	defer cancel()
+	defer ret.Close()
 
-	for _, ret := range rets {
-
+	for _, ret := range ret.Infos {
 		client := redis.NewClient(&redis.Options{
 			Addr:       ret.URI,
 			Password:   "",
@@ -73,20 +72,22 @@ func TestRedis(t *testing.T) {
 
 func TestMongo(t *testing.T) {
 
-	opt := &Option{
-		Image:       "mongo:4.4",
-		ExposedPort: "27017",
-		BindingPort: "37017",
+	opt := []*Option{
+		{
+			Image:       "mongo:4.4",
+			ExposedPort: "27017",
+			BindingPort: "37017",
+		},
 	}
 
-	ret, cancel, err := WithContainer(context.Background(), opt)
+	ret, err := WithContainers(context.Background(), opt)
 	if err != nil {
 		panic(err)
 	}
-	defer cancel()
+	defer ret.Close()
 
 	c := context.Background()
-	client, err := mongo.Connect(c, options.Client().ApplyURI("mongodb://"+ret.URI))
+	client, err := mongo.Connect(c, options.Client().ApplyURI("mongodb://"+ret.Infos[0].URI))
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
 
@@ -172,20 +173,22 @@ func TestMongo(t *testing.T) {
 
 func TestMysql(t *testing.T) {
 
-	opt := &Option{
-		Image:       "mysql:latest",
-		ExposedPort: "3306",
-		BindingPort: "33306",
-		Env:         []string{"MYSQL_ALLOW_EMPTY_PASSWORD=yes", "USER=root", "MYSQL_DATABASE=demo"},
+	opt := []*Option{
+		{
+			Image:       "mysql:latest",
+			ExposedPort: "3306",
+			BindingPort: "33306",
+			Env:         []string{"MYSQL_ALLOW_EMPTY_PASSWORD=yes", "USER=root", "MYSQL_DATABASE=demo"},
+		},
 	}
 	c := context.Background()
-	rs, cancel, err := WithContainer(c, opt)
+	result, err := WithContainers(c, opt)
 	if err != nil {
 		panic(err)
 	}
-	defer cancel()
+	defer result.Close()
 
-	dbDSN := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=%s", "root", "", rs.Host, rs.BindingPort, "demo", "utf8mb4")
+	dbDSN := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=%s", "root", "", result.Infos[0].Host, result.Infos[0].BindingPort, "demo", "utf8mb4")
 	db, err := sql.Open("mysql", dbDSN)
 	assert.NoError(t, err)
 
